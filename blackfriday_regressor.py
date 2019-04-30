@@ -1,89 +1,216 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
+import statsmodels.formula.api as sm
 import seaborn as sns
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, confusion_matrix, accuracy_score
+
+"""
+PROBLEMAS A TENTAR RESOLVER:
+
+Descritivo:
+
+
+
+Predição:
+*Predição de Venda
+*Qual produto oferecer
+
+"""
+
 
 dataset = pd.read_csv('BlackFriday.csv')
 
-#ELIMINANDO VARIÁVEIS DESNECESSÁRIAS
-dataset = dataset.drop(['User_ID', 'Product_Category_2', 'Product_Category_3', 'Product_ID'], axis=1)
-
-#FAZENDO UMA AMOSTRA
-dataset = dataset.sample(int(len(dataset)*0.2))
-
-#SETANDO INDEXES E COLUNAS
-dataset.index = range(len(dataset))
-colunas = dataset.columns
-dataset.columns = range(len(dataset.columns))
-
-#GRÁFICO DE VARIÁVEIS CATEGÓRICAS
-for i in range(len(dataset.columns)):
-    if(dataset[i].describe().dtype=='object'):
-        sns.boxplot(dataset[i], dataset[7])
-        plt.title(colunas[i])
-        plt.show()
+print(dataset.columns)
 
 
-#ELIMINANDO OUTLIERS
-quartil3 = dataset[7].quantile(0.95)
-
-for i in range(len(dataset)):
-    if(dataset[7][i]>quartil3):
-        dataset = dataset.drop(i)
+dataset_categorical = dataset[['Product_Category_1', 'Product_Category_2']].copy()
 
 
+#PREENCHENDO NULOS DA CATEGORIA 2
+produto2_random = pd.DataFrame(dataset_categorical['Product_Category_2'].value_counts(1))
+produto2_random = produto2_random.reset_index()
+dataset_categorical['Product_Category_2'].fillna(np.random.choice(produto2_random.index, p=produto2_random.Product_Category_2), inplace=True)
 
-X = dataset.iloc[:, [0,1,2,3,4,5,6]].values
-y = dataset.iloc[:, 7].values
+#DIVIDINDO VARIÁVEIS POR CATEGORIA
+categorical1 = dataset_categorical['Product_Category_1']
+categorical2 = dataset_categorical['Product_Category_2']
 
-#NORMALIZANDO Y
-y = np.log(y)
+
+#STANDARD SCALER
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+
+
+dataset_easy = dataset[['User_ID', 'Gender', 'Age', 'Occupation', 'City_Category','Stay_In_Current_City_Years', 'Marital_Status', 'Purchase']].copy()
 
 
 #LABEL ENCODER
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+labelencoder = LabelEncoder()
+dataset_easy['Gender'] = labelencoder.fit_transform(dataset_easy['Gender'])
 
 labelencoder = LabelEncoder()
-X[:, 0] = labelencoder.fit_transform(X[:, 0])
+dataset_easy['Age'] = labelencoder.fit_transform(dataset_easy['Age'])
 
 labelencoder = LabelEncoder()
-X[:, 1] = labelencoder.fit_transform(X[:, 1])
+dataset_easy['Occupation'] = labelencoder.fit_transform(dataset_easy['Occupation'])
 
 labelencoder = LabelEncoder()
-X[:, 3] = labelencoder.fit_transform(X[:, 3])
+dataset_easy['City_Category'] = labelencoder.fit_transform(dataset_easy['City_Category'])
 
 labelencoder = LabelEncoder()
-X[:, 4] = labelencoder.fit_transform(X[:, 4])
+dataset_easy['Stay_In_Current_City_Years'] = labelencoder.fit_transform(dataset_easy['Stay_In_Current_City_Years'])
+
+labelencoder = LabelEncoder()
+dataset_easy['Marital_Status'] = labelencoder.fit_transform(dataset_easy['Marital_Status'])
+
+dataset_easy2 = dataset_easy[['Gender', 'Age', 'Occupation', 'City_Category', 'Stay_In_Current_City_Years', 'Marital_Status']].copy()
 
 
-X = np.array(X, dtype=float)
+from info_gain import info_gain
+"""
+Gender  = info_gain.info_gain(dataset_easy2['Gender'], categorical1)
+Age  = info_gain.info_gain(dataset_easy2['Age'], categorical1)
+Occupation  = info_gain.info_gain(dataset_easy2['Occupation'], categorical1)
+City_Category  = info_gain.info_gain(dataset_easy2['City_Category'], categorical1)
+Stay_In_Current_City_Years  = info_gain.info_gain(dataset_easy2['Stay_In_Current_City_Years'], categorical1)
+Marital_Status  = info_gain.info_gain(dataset_easy2['Marital_Status'], categorical1)
+print(Gender, Age, Occupation, City_Category, Stay_In_Current_City_Years, Marital_Status)
+"""
+#Gender, Age e Occupation são os melhores preditores para prever categorical1
 
-#ONEHOT ENCODER
-onehot = OneHotEncoder(categorical_features=[4, 6])
+dataset_easy2 = dataset_easy2[['Gender', 'Age', 'Occupation']].copy()
+
+
+
+
+dataset_easy = dataset_easy.groupby('User_ID')['Gender', 'Age', 'Occupation', 'City_Category',
+       'Stay_In_Current_City_Years', 'Marital_Status', 'Purchase'].mean()
+
+
+
+X = dataset_easy[['Gender', 'Age', 'Occupation', 'City_Category', 'Stay_In_Current_City_Years', 'Marital_Status']].copy()
+
+y = np.array(dataset_easy['Purchase'].copy())
+
+
+
+#ONEHOTENCODER
+onehot = OneHotEncoder(categorical_features=[2, 4])
 X = onehot.fit_transform(X).toarray()
 
+onehot = OneHotEncoder(categorical_features=[2])
+dataset_easy2 = onehot.fit_transform(dataset_easy2).toarray()
 
-#VERIFICANDO VALOR P
-regressor_OLS = sm.OLS(exog=X, endog=y).fit()
-print(regressor_OLS.summary())
 
-#TRAIN TEST SPLIT
+
+#Teste de Significância
+"""
+OLS = sm.OLS(exog=X, endog=y).fit()
+print(OLS.summary())
+"""
+
+
+
+X = pd.DataFrame(X)
+y = pd.Series(y)
+
+X = X.drop([27, 29], axis=1)
+
+#REMOVENDO OUTLIERS
+max = y.quantile(0.75)+(y.quantile(0.75)-y.quantile(0.25))*1.5
+min = y.quantile(0.25)+(y.quantile(0.75)-y.quantile(0.25))*1.5
+
+for i in range(len(y)):
+       if(y[i]>max or y[i]<min):
+              y = y.drop(i, axis=0)
+              X = X.drop(i, axis=0)
+
+
+
+
+
+#DIVIDINDO O DATASET
+
 from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state = 0)
-
-#RANDOM FOREST
-from sklearn.ensemble import RandomForestRegressor
-rfr = RandomForestRegressor(n_estimators=300)
-rfr.fit(X_train, y_train)
-y_pred = rfr.predict(X_test)
+X_train2, X_test2, y_train2, y_test2 = train_test_split(dataset_easy2, categorical1, test_size=0.2, random_state=0)
 
 
-y_test = np.exp(y_test)
-y_pred = np.exp(y_pred)
+# Feature Scaling
+from sklearn.preprocessing import StandardScaler
+sc2 = StandardScaler()
+X_train2 = sc2.fit_transform(X_train2)
+X_test2 = sc2.transform(X_test2)
+
+
+#CLASSIFICADOR
+from sklearn.ensemble import AdaBoostClassifier
+abc = AdaBoostClassifier()
+
+abc.fit(X_train2, y_train2)
+y_pred_abc = abc.predict(X_test2)
+
+print('y_pred_abc', y_pred_abc)
+
+cm = confusion_matrix(y_test2, y_pred_abc)
+
+print(pd.DataFrame(cm))
+
+
+#      PREDIZENDO VALORES DOS PRODUTOS
+
+#DIVIDINDO O DATASET
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+
+
+# Feature Scaling
+from sklearn.preprocessing import StandardScaler
+sc = StandardScaler()
+X_train = sc.fit_transform(X_train)
+X_test = sc.transform(X_test)
+
+
+
+#ADABOOST
+from sklearn.ensemble import AdaBoostRegressor
+ada = AdaBoostRegressor(learning_rate=0.1, loss='linear', n_estimators=900)
+ada.fit(X_train, y_train)
+
+y_pred_ada = ada.predict(X_test)
+
+
+
+print('grid')
+#GRID SEARCH
+"""
+from sklearn.model_selection import GridSearchCV
+parameters = [{'n_estimators': [300, 600, 900], 'learning_rate': [0.001, 0.01, 0.1], 'loss':['linear', 'square', 'exponential']}]
+grid_search = GridSearchCV(estimator = ada,
+                           param_grid = parameters,
+                           scoring = 'neg_mean_squared_error',
+                           cv = 10,
+                           )
+
+grid_search = grid_search.fit(X_train, y_train)
+
+best_accuracy = grid_search.best_score_
+best_parameters = grid_search.best_params_
+
+print('best_accuracy = ', best_accuracy)
+print('best_parameters = ', best_parameters)
+
+
+y_pred_grid = grid_search.predict(X_test)
+
+"""
+
+
+
 
 
 #MÉTRICAS
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-print("RMSE", mean_squared_error(y_test, y_pred)**0.5)
-print("mean_absolute_error", mean_absolute_error(y_test, y_pred)/np.mean(y_test))
+
+print('RMSE/mean(y_test)', np.sqrt(mean_squared_error(y_test, y_pred_ada))/np.mean(y_test))
+print('MAE/mean(y_test)', (mean_absolute_error(y_test, y_pred_ada)/np.mean(y_test)))
+print('r2_score', r2_score(y_test, y_pred_ada))
